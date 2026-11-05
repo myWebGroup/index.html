@@ -893,7 +893,22 @@
             if (currentUser) localStorage.setItem('sr_currentUser', JSON.stringify(currentUser));
         }
 
+        // Convert common Google Drive share links into direct image URLs.
+        // The Drive file must be shared as: Anyone with the link - Viewer.
+        function getDisplayImageUrl(value) {
+            var url = String(value || '').trim();
+            if (!url) return DEFAULT_FALLBACK_IMG;
+            var match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                        url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+            if (match && /drive\.google\.com/.test(url)) {
+                return 'https://drive.google.com/uc?export=view&id=' + match[1];
+            }
+            return url;
+        }
+
         function handleImgError(img) {
+            if (img.dataset && img.dataset.fallbackApplied === '1') return;
+            if (img.dataset) img.dataset.fallbackApplied = '1';
             img.onerror = null;
             img.src = DEFAULT_FALLBACK_IMG;
         }
@@ -1129,7 +1144,7 @@
             grid.innerHTML = equipment.map(function(eq) {
                 var stock = getEquipmentStockInfo(eq.id);
                 return '<div onclick="selectEquipmentToBorrow(' + eq.id + ')" class="bg-white/95 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition cursor-pointer p-3 flex gap-3 items-center">' +
-                    '<img src="' + eq.imageUrl + '" onerror="handleImgError(this)" class="w-16 h-16 rounded-xl object-cover shrink-0 border border-slate-100">' +
+                    '<img src="' + getDisplayImageUrl(eq.imageUrl) + '" onerror="handleImgError(this)" class="w-16 h-16 rounded-xl object-cover shrink-0 border border-slate-100">' +
                     '<div class="min-w-0 flex-grow">' +
                         '<h4 class="font-bold text-navy-800 text-xs sm:text-sm truncate">' + eq.name + '</h4>' +
                         '<p class="text-[11px] text-slate-500 mt-0.5">หมวด: ' + eq.category + '</p>' +
@@ -1537,7 +1552,7 @@
                 var stock = getEquipmentStockInfo(eq.id);
                 return '<div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">' +
                     '<div class="h-40 w-full bg-slate-100 relative overflow-hidden">' +
-                        '<img src="' + eq.imageUrl + '" onerror="handleImgError(this)" class="w-full h-full object-cover">' +
+                        '<img src="' + getDisplayImageUrl(eq.imageUrl) + '" onerror="handleImgError(this)" class="w-full h-full object-cover">' +
                         '<span class="absolute top-2.5 right-2.5 bg-navy-800/80 backdrop-blur-md text-amber-300 text-[11px] px-2.5 py-0.5 rounded-full font-bold shadow">' +
                             eq.category +
                         '</span>' +
@@ -1589,7 +1604,7 @@
             var editId = document.getElementById('eqEditId').value;
             var name = document.getElementById('eqName').value.trim();
             var category = document.getElementById('eqCategory').value.trim();
-            var imageUrl = document.getElementById('eqImageUrl').value.trim();
+            var imageUrl = getDisplayImageUrl(document.getElementById('eqImageUrl').value.trim());
             var totalQty = parseInt(document.getElementById('eqTotalQty').value);
 
             if (editId) {
@@ -1851,7 +1866,7 @@
         }
 
         // ===== PATCH: reliable local/cloud persistence + stable session =====
-        var GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwMNbJdNUjv_8MQ-EdHAamLw9uhjw0sTQ8wwMDiQdE9TfargTdAvGhCr5aq07DVt25Q/exec";
+        var GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwIrYTQmyD20JjtCTOdo0HFI1mAqL1wK9o02BtUOHo_zDFZF25ZtCqpWH7w4usLmI45/exec";
         var cloudWriteQueue = Promise.resolve();
         var cloudReady = false;
         var cloudSyncBusy = false;
@@ -1900,18 +1915,25 @@
             return cloudWriteQueue;
         }
 
-        function mergeByKey(cloudList, localList, keyName) {
+        function mergeByKey(cloudList, localList, keyName, preferLocalOnTie) {
             var map = Object.create(null);
-            // Cloud is applied first; local fills only records missing from cloud.
-            (Array.isArray(cloudList) ? cloudList : []).forEach(function (item) {
-                if (item && item[keyName] !== undefined && item[keyName] !== null)
-                    map[String(item[keyName]).trim()] = item;
-            });
+            function stamp(item) {
+                var value = item && (item.updatedAt || item.createdAt);
+                var time = value ? Date.parse(value) : 0;
+                return isFinite(time) ? time : 0;
+            }
+            // Merge by ID. The record with the newest timestamp wins; when timestamps
+            // are absent/equal, keep the local copy to avoid reverting a recent local PIN.
             (Array.isArray(localList) ? localList : []).forEach(function (item) {
-                if (item && item[keyName] !== undefined && item[keyName] !== null) {
-                    var key = String(item[keyName]).trim();
-                    if (!map[key]) map[key] = item;
-                }
+                if (!item || item[keyName] == null) return;
+                map[String(item[keyName]).trim()] = item;
+            });
+            (Array.isArray(cloudList) ? cloudList : []).forEach(function (item) {
+                if (!item || item[keyName] == null) return;
+                var key = String(item[keyName]).trim();
+                var local = map[key];
+                if (!local || stamp(item) > stamp(local)) map[key] = item;
+                else if (stamp(item) === stamp(local)) map[key] = preferLocalOnTie ? Object.assign({}, item, local) : Object.assign({}, local, item);
             });
             return Object.keys(map).map(function (key) { return map[key]; });
         }
@@ -1930,8 +1952,8 @@
                 })
                 .then(function (data) {
                     if (!data || typeof data !== 'object') throw new Error('Invalid cloud response');
-                    students = mergeByKey(data.students, localStudents, 'studentId');
-                    borrows = mergeByKey(data.borrows, JSON.parse(localStorage.getItem('sr_borrows') || '[]'), 'id');
+                    students = mergeByKey(data.students, localStudents, 'studentId', true);
+                    borrows = mergeByKey(data.borrows, JSON.parse(localStorage.getItem('sr_borrows') || '[]'), 'id', false);
                     if (Array.isArray(data.equipment) && data.equipment.length) equipment = data.equipment;
                     if (data.settings && typeof data.settings === 'object') settings = data.settings;
                     saveLocalSnapshot();
@@ -1988,7 +2010,7 @@
                 }
                 var newStudent = {
                     studentId: studentId, fullName: name, grade: grade, roomNumber: roomNo,
-                    phone: phone, pin: pin, role: 'student', score: 100,
+                    phone: phone, pin: pin, role: 'student', updatedAt: new Date().toISOString(), score: 100,
                     scoreLogs: [{ date: new Date().toISOString(), points: 100, reason: 'คะแนนแรกเริ่มเปิดบัญชีนักเรียน' }]
                 };
                 students.push(newStudent);
@@ -2028,8 +2050,25 @@
         }
 
         // Refresh data every 5 seconds without resetting authentication or returning to register.
+        function ensureDemoAccount() {
+            var demoId = '15686';
+            if (!students.some(function (student) { return String(student.studentId).trim() === demoId; })) {
+                var now = new Date().toISOString();
+                students.push({
+                    studentId: demoId, fullName: 'ผู้ใช้ทดลองระบบ', grade: 'ทดลองใช้งาน',
+                    roomNumber: '-', phone: '-', pin: '1234', role: 'student', score: 100,
+                    scoreLogs: [{ date: now, points: 100, reason: 'บัญชีทดลองระบบ' }],
+                    createdAt: now, updatedAt: now
+                });
+                saveStorage();
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
-            loadStorage();
+            loadStorage().then(function () {
+                ensureDemoAccount();
+                renderApp();
+            });
             window.setInterval(function () {
                 if (!document.hidden) loadStorage();
             }, 5000);
@@ -2046,6 +2085,35 @@
         });
         // ===== END PATCH =====
 
-    </script>
+        // Demo account for evaluation. It is created only if the ID does not exist.
+        // Student ID: 15686 | PIN: 1234
+        document.addEventListener('DOMContentLoaded', function () {
+            loadStorage().then(function () {
+                var demoId = '15686';
+                var exists = students.some(function (student) {
+                    return String(student.studentId).trim() === demoId;
+                });
+                if (!exists) {
+                    students.push({
+                        studentId: demoId,
+                        fullName: 'ผู้ใช้ทดลองระบบ',
+                        grade: 'ทดลองใช้งาน',
+                        roomNumber: '-',
+                        phone: '-',
+                        pin: '1234',
+                        role: 'student',
+                        score: 100,
+                        scoreLogs: [{ date: new Date().toISOString(), points: 100, reason: 'บัญชีทดลองระบบ' }],
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString()
+                    });
+                    saveStorage();
+                }
+            }).catch(function (error) {
+                console.error('Demo account initialization failed:', error);
+            });
+        });
+
+</script>
 </body>
 </html>
