@@ -791,8 +791,32 @@
     <!-- JAVASCRIPT CORE LOGIC -->
     <script>
         var DEFAULT_FALLBACK_IMG = 'https://images.unsplash.com/photo-1517649763962-0c6232661a0b?w=500&q=80';
+        // ภาพประกอบฝังในหน้าเว็บ ไม่พึ่งลิงก์ภายนอก จึงแสดงได้ทุกเครื่อง
+        function getEquipmentImage(eq) {
+            var n = String((eq && eq.name) || ''), c = String((eq && eq.category) || ''), key = n + ' ' + c;
+            var glyph = '🏅', bg = '#e0f2fe';
+            if (/เปตอง/.test(key)) { glyph = '⚪'; bg = '#f1f5f9'; }
+            else if (/ตะกร้อ/.test(key)) { glyph = '🟠'; bg = '#ffedd5'; }
+            else if (/ฟุตบอล|ฟุตซอล/.test(key)) { glyph = '⚽'; bg = '#dcfce7'; }
+            else if (/บาส/.test(key)) { glyph = '🏀'; bg = '#ffedd5'; }
+            else if (/วอลเลย์/.test(key)) { glyph = '🏐'; bg = '#fef9c3'; }
+            else if (/ปิงปอง/.test(key)) { glyph = '🏓'; bg = '#fee2e2'; }
+            else if (/กรวย|ซ้อม/.test(key)) { glyph = '🔺'; bg = '#ffedd5'; }
+            else if (/เน็ท|ตาข่าย/.test(key)) { glyph = '🥅'; bg = '#dbeafe'; }
+            else if (/แบด/.test(key)) { glyph = '🏸'; bg = '#dcfce7'; }
+            var safeName = n.replace(/[&<>"]/g, '');
+            var art = '<text x="320" y="245" text-anchor="middle" font-size="170">'+glyph+'</text>';
+            if (/เปตอง/.test(key)) {
+                art = '<defs><radialGradient id="steel" cx="32%" cy="25%" r="75%"><stop offset="0" stop-color="#fff"/><stop offset=".22" stop-color="#dbe2ea"/><stop offset=".58" stop-color="#8793a2"/><stop offset="1" stop-color="#344054"/></radialGradient></defs><circle cx="320" cy="190" r="112" fill="url(#steel)" stroke="#64748b" stroke-width="8"/><path d="M245 130 Q290 85 360 110" fill="none" stroke="#fff" stroke-width="14" opacity=".7" stroke-linecap="round"/>';
+            } else if (/ตะกร้อ/.test(key)) {
+                art = '<circle cx="320" cy="190" r="112" fill="#d99a42" stroke="#8a5522" stroke-width="9"/><g fill="none" stroke="#704214" stroke-width="13" stroke-linecap="round"><path d="M225 130 Q320 210 415 130"/><path d="M220 190 Q320 110 420 190"/><path d="M245 270 Q320 185 395 270"/><path d="M320 78 Q250 190 320 302"/><path d="M270 90 Q370 190 270 290"/><path d="M370 90 Q270 190 370 290"/></g>';
+            }
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" rx="28" fill="'+bg+'"/><circle cx="320" cy="190" r="125" fill="#fff" opacity=".75"/>'+art+'<text x="320" y="365" text-anchor="middle" font-family="sans-serif" font-size="30" font-weight="700" fill="#1e293b">'+safeName+'</text></svg>';
+            return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+        }
+
         var ADMIN_CREDS = { studentId: 'ADMIN', pin: '8888', fullName: 'ผู้ดูแลระบบ (งานกีฬา)', role: 'admin' };
-        var GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzJ1MuNIUmt5ZQihdDfg3pYaAJDL3yQ8jXcL2WIuxZHUrg2R3WPlnqH436MG_Ray1Nv/exec";
+        var GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz3PRr2Z_pAsbRYKIBZkL6W1csPKR0TZjsR9TualZNWkJyfTGeyxQrrZ4tsjesMC3QN/exec";
 
         var DEFAULT_RULES_TIME = '• ยืมอุปกรณ์กีฬาได้สูงสุดครั้งละไม่เกิน 7 วัน\n• หากต้องการต่อเวลา ต้องนำอุปกรณ์ที่ยืมมาแสดงเพื่อยืนยันกับครูประจำวิชาสุขศึกษาและพลศึกษา หรือครูผู้รับผิดชอบเท่านั้น (ไม่อนุญาตให้ต่อเวลาในระบบออนไลน์ทุกกรณี!)\n• เวลารับอุปกรณ์: สามารถมารับอุปกรณ์ที่ยืมได้เฉพาะเวลา "พักเที่ยง" และ "หลังเลิกเรียน" เท่านั้น\n• ต้องนำหลักฐานการยืม (หน้าจออนุมัติในระบบ) มาแสดงต่อครูผู้ดูแลก่อนรับอุปกรณ์กีฬา';
 
@@ -1015,7 +1039,9 @@
                             if (latest) currentUser = latest;
                         }
                         applySettings();
-                        renderApp();
+                        // Update data in place; do not rebuild the whole view during admin actions.
+                        if (currentUser && currentUser.role === 'admin') renderAdminPortal();
+                        else if (currentUser) renderStudentPortal();
                     }
                     return true;
                 })
@@ -1191,9 +1217,9 @@
 
             var borrowedQty = borrows
                 .filter(function(b) { 
-                    return b.equipmentId === eqId && (b.status === 'issued' || b.status === 'approved' || b.status === 'pending'); 
+                    return String(b.equipmentId) === String(eqId) && (b.status === 'issued' || b.status === 'approved' || b.status === 'pending'); 
                 })
-                .reduce(function(sum, b) { return sum + parseInt(b.quantity || 0); }, 0);
+                .reduce(function(sum, b) { return sum + Math.max(0, Number(b.quantity) || 0); }, 0);
 
             return {
                 total: item.totalQty,
@@ -1299,7 +1325,7 @@
             grid.innerHTML = equipment.map(function(eq) {
                 var stock = getEquipmentStockInfo(eq.id);
                 return `<div onclick="selectEquipmentToBorrow(${eq.id})" class="bg-white/95 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition cursor-pointer p-3 flex gap-3 items-center">` +
-                    `<img src="${escapeHtml(getDisplayImageUrl(eq.imageUrl))}" onerror="handleImgError(this)" class="w-16 h-16 rounded-xl object-cover shrink-0 border border-slate-100">` +
+                    `<img src="${escapeHtml(getEquipmentImage(eq))}" onerror="handleImgError(this)" class="w-16 h-16 rounded-xl object-cover shrink-0 border border-slate-100">` +
                     `<div class="min-w-0 flex-grow">` +
                         `<h4 class="font-bold text-navy-800 text-xs sm:text-sm truncate">${escapeHtml(eq.name)}</h4>` +
                         `<p class="text-[11px] text-slate-500 mt-0.5">หมวด: ${escapeHtml(eq.category)}</p>` +
@@ -1373,6 +1399,8 @@
             }
 
             var stock = getEquipmentStockInfo(eqId);
+            if (!Number.isInteger(qty) || qty < 1) { alert('กรุณาระบุจำนวนเป็นจำนวนเต็มตั้งแต่ 1 ชิ้นขึ้นไป'); return; }
+            if (!Number.isInteger(qty) || qty < 1) { alert('กรุณาระบุจำนวนเป็นจำนวนเต็มตั้งแต่ 1 ชิ้นขึ้นไป'); return; }
             if (qty > stock.available) {
                 alert('จำนวนอุปกรณ์ไม่เพียงพอ! ขณะนี้มีพร้อมให้ยืมเพียง ' + stock.available + ' ชิ้น');
                 return;
@@ -1412,15 +1440,35 @@
                 updatedAt: new Date().toISOString()
             };
 
-            borrows.unshift(newBorrow);
-            saveStorage();
-
-            document.getElementById('borrowPurposeOther').value = '';
+            var submitBtn = document.getElementById('btnSubmitBorrow');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังตรวจสอบคลัง...';
+            var reserveRequest = GOOGLE_SCRIPT_URL
+                ? fetch(GOOGLE_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                    body:JSON.stringify({action:'createBorrow', borrow:newBorrow}), cache:'no-store'})
+                    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+                    .then(function(result){
+                        if(!result || !result.success) throw new Error((result && result.message) || 'ไม่สามารถสำรองอุปกรณ์ได้');
+                        if(result.borrow) newBorrow = result.borrow;
+                        borrows.unshift(newBorrow);
+                    })
+                : Promise.resolve().then(function(){ borrows.unshift(newBorrow); saveLocalSnapshot(); });
+            reserveRequest.then(function(){
+                saveLocalSnapshot();
+                document.getElementById('borrowPurposeOther').value = '';
             document.getElementById('otherPurposeContainer').classList.add('hidden');
 
-            alert('ยื่นคำขอยืมอุปกรณ์สำเร็จ!\nกรุณามารับอุปกรณ์ ณ ห้องพละ ในช่วงเวลาพักเที่ยง หรือ หลังเลิกเรียน พร้อมแสดงหลักฐานอนุมัติในระบบ');
-            switchStudentTab('history');
-            renderStudentPortal();
+                alert('ส่งคำขอยืมสำเร็จ และระบบสำรองจำนวนอุปกรณ์ไว้ทันทีแล้ว กรุณารออนุมัติ');
+                switchStudentTab('history');
+                renderStudentPortal();
+            }).catch(function(err){
+                alert('ไม่สามารถยืนยันการยืมได้: '+err.message+'\\nระบบยังไม่ได้บันทึกคำขอ กรุณาลองใหม่');
+            }).finally(function(){
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> ยื่นคำขอยืมอุปกรณ์';
+                updateAvailableStockBadge();
+                renderStudentPortal();
+            });
         }
 
         function renderStudentHistoryTable() {
@@ -1436,7 +1484,7 @@
                 return `<tr class="hover:bg-slate-50 transition">` +
                     `<td class="p-3 font-semibold text-navy-800">` +
                         `<div class="flex items-center gap-2">` +
-                            `<img src="${escapeHtml(getDisplayImageUrl(b.equipmentImg))}" onerror="handleImgError(this)" class="w-8 h-8 rounded-lg object-cover border border-slate-200 shrink-0 shadow-sm">` +
+                            `<img src="${escapeHtml(getEquipmentImage({name:b.equipmentName, category:b.equipmentName}))}" onerror="handleImgError(this)" class="w-8 h-8 rounded-lg object-cover border border-slate-200 shrink-0 shadow-sm">` +
                             `<div>` +
                                 `<div class="font-bold truncate max-w-[130px] sm:max-w-none">${escapeHtml(b.equipmentName)}</div>` +
                                 `<div class="text-[10px] text-amber-700 font-normal mt-0.5">🎯 ${escapeHtml(b.purpose || 'ไม่ระบุวัตถุประสงค์')}</div>` +
@@ -1620,7 +1668,7 @@
                     `</td>` +
                     `<td class="p-3 font-semibold text-slate-800">` +
                         `<div class="flex items-center gap-2">` +
-                            `<img src="${escapeHtml(getDisplayImageUrl(b.equipmentImg))}" onerror="handleImgError(this)" class="w-8 h-8 rounded-lg object-cover border shrink-0">` +
+                            `<img src="${escapeHtml(getEquipmentImage({name:b.equipmentName, category:b.equipmentName}))}" onerror="handleImgError(this)" class="w-8 h-8 rounded-lg object-cover border shrink-0">` +
                             `<div>` +
                                 `<span class="font-bold truncate max-w-[120px] sm:max-w-none">${escapeHtml(b.equipmentName)}</span>` +
                                 `<span class="text-amber-600 font-bold ml-1">x${b.quantity}</span>` +
@@ -1649,17 +1697,44 @@
         }
 
         function updateBorrowStatus(id, newStatus) {
-            var item = borrows.find(function(b) { return String(b.id) === String(id); });
-            if (item) {
-                if (newStatus === 'rejected') {
-                    var reason = prompt('ระบุเหตุผลในการไม่อนุมัติคำขอ:');
-                    if (reason !== null) item.adminNote = reason;
-                }
-                item.status = newStatus;
-                item.updatedAt = new Date().toISOString();
-                saveStorage();
-                renderAdminPortal();
+            var item = borrows.find(function(b){ return String(b.id) === String(id); });
+            if (!item) return;
+            var reason = '';
+            if (newStatus === 'rejected') {
+                reason = prompt('ระบุเหตุผลในการไม่อนุมัติคำขอ:');
+                if (reason === null) return;
             }
+            var previousStatus = item.status;
+            var previousNote = item.adminNote;
+            item.status = newStatus;
+            item.adminNote = reason;
+            item.updatedAt = new Date().toISOString();
+            saveLocalSnapshot();
+            var request = GOOGLE_SCRIPT_URL
+                ? fetch(GOOGLE_SCRIPT_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+                    body:JSON.stringify({action:'updateBorrowStatus', id:id, status:newStatus, adminNote:reason}), cache:'no-store'})
+                    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+                    .then(function(result){
+                        if(!result || !result.success) throw new Error((result && result.message) || 'บันทึกสถานะไม่สำเร็จ');
+                        if(result.borrow) {
+                            var idx = borrows.findIndex(function(x){ return String(x.id) === String(id); });
+                            if(idx >= 0) borrows[idx] = result.borrow;
+                        }
+                        if(Array.isArray(result.borrows)) borrows = result.borrows;
+                    })
+                : Promise.resolve();
+            request.then(function(){
+                saveLocalSnapshot();
+                renderAdminPortal();
+                alert(newStatus === 'approved' ? 'อนุมัติคำขอยืมเรียบร้อยแล้ว' :
+                      newStatus === 'issued' ? 'บันทึกการจ่ายอุปกรณ์เรียบร้อยแล้ว' : 'บันทึกการปฏิเสธเรียบร้อยแล้ว');
+            }).catch(function(err){
+                item.status = previousStatus;
+                item.adminNote = previousNote;
+                saveLocalSnapshot();
+                renderAdminPortal();
+                alert('บันทึกไม่สำเร็จ: '+err.message+' กรุณาลองใหม่');
+            });
         }
 
         function openReturnPenaltyModal(id) {
@@ -1720,7 +1795,7 @@
                 var stock = getEquipmentStockInfo(eq.id);
                 return `<div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">` +
                     `<div class="h-40 w-full bg-slate-100 relative overflow-hidden">` +
-                        `<img src="${escapeHtml(getDisplayImageUrl(eq.imageUrl))}" onerror="handleImgError(this)" class="w-full h-full object-cover">` +
+                        `<img src="${escapeHtml(getEquipmentImage(eq))}" onerror="handleImgError(this)" class="w-full h-full object-cover">` +
                         `<span class="absolute top-2.5 right-2.5 bg-navy-800/80 backdrop-blur-md text-amber-300 text-[11px] px-2.5 py-0.5 rounded-full font-bold shadow">` +
                             escapeHtml(eq.category) +
                         `</span>` +
@@ -1772,7 +1847,8 @@
             var editId = document.getElementById('eqEditId').value;
             var name = document.getElementById('eqName').value.trim();
             var category = document.getElementById('eqCategory').value.trim();
-            var imageUrl = getDisplayImageUrl(document.getElementById('eqImageUrl').value.trim());
+            var imageUrl = document.getElementById('eqImageUrl').value.trim();
+            if (!imageUrl) imageUrl = getEquipmentImage({name:name, category:category});
             var totalQty = parseInt(document.getElementById('eqTotalQty').value);
 
             if (editId) {
